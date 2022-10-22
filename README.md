@@ -1,6 +1,6 @@
 # Synch0le
 
-This tool is for exploring HTTP De-Sync attacks using the CL.0 methods detailed by James Kettle in his research "Browser-Powered Desync Attacks: A New Frontier in
+This tool is for exploring HTTP De-Sync attacks using the CL.0 methods detailed by [James Kettle](https://skeletonscribe.net/) in his [research](https://i.blackhat.com/USA-22/Wednesday/us-22-Kettle-Browser-Powered-Desync-Attacks-wp.pdf) "Browser-Powered Desync Attacks: A New Frontier in
 HTTP Request Smuggling" published at Defcon and Blackhat. 
 
 Full blog [post](https://sharpsec.run/?p=127).
