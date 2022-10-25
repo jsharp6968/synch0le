@@ -7,7 +7,7 @@ Full blog [post](https://sharpsec.run/?p=127).
 
 This tool is for quickly scanning endpoints to figure out if they might be vulnerable to a Desync attack. Actually attacking such vulns in applications requires work on a case by case basis: this tool will not pwn anything for you. It is intended to be fed lists of subdomains from something like `subfinder`, and then also endpoints from something like `dirb` or `dirbuster` for CL.TE and TE.CL vectors, and indicate whether or not the basic conditions of the vuln exist.
 
-Eventually it will support all known DeSync techniques, but for now it handles CL.0 (client-side), CL.TE and TE.CL.
+Eventually it will support all known DeSync techniques, but for now it handles CL.0 (client-side), CL.TE and TE.CL (server-side) vectors.
 
 # Capability
 Synch0le will take a URL, or a file with a list of URLS, and probe each of them to determine:
