@@ -2,3 +2,4 @@ aiohttp==3.8.1
 colorama==0.4.4
 prettytable==0.0.0
 pyfiglet==0.8.post1
+termcolor==2.0.1
